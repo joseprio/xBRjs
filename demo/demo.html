@@ -21,8 +21,8 @@
 
         /*When image loads...*/
         image.onload =  function(e){
-		  original.setAttribute("width", image.width*2);
-		  original.setAttribute("height", image.height*2);
+		  original.setAttribute("width", image.width);
+		  original.setAttribute("height", image.height);
         /*Apply 2xBR*/
         var resultCanvas = applyXBR(image, 2);
 
@@ -33,7 +33,6 @@
         resultCanvas = applyXBR(image, 4);
 
 		document.body.appendChild(resultCanvas);
-		alert("done");
         };
       }
     </script>

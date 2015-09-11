@@ -20,4 +20,4 @@ A canvas with the scaled image will be returned.
 Demo
 ----
 
-Check it out [here](http://joseprio.github.io/xBRjs/ide.html).
+Check it out [here](http://joseprio.github.io/xBRjs/demo/demo.html).
