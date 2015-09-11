@@ -1,0 +1,41 @@
+<html>
+  <head>
+    <title>xBR js demo</title>
+        <script type="text/javascript" src="../xBRjs.js"></script>
+    </head>
+
+    <body>
+
+	<img id="original">
+
+    <script type="text/javascript">
+
+      window.onload = function(){
+		var original = document.getElementById("original");
+		
+        /*Load Original Image*/
+        var image = new Image();
+        image.src="image.png";
+		original.src = image.src;
+		original.setAttr
+
+        /*When image loads...*/
+        image.onload =  function(e){
+		  original.setAttribute("width", image.width*2);
+		  original.setAttribute("height", image.height*2);
+        /*Apply 2xBR*/
+        var resultCanvas = applyXBR(image, 2);
+
+		document.body.appendChild(resultCanvas);
+        resultCanvas = applyXBR(image, 3);
+
+		document.body.appendChild(resultCanvas);
+        resultCanvas = applyXBR(image, 4);
+
+		document.body.appendChild(resultCanvas);
+		alert("done");
+        };
+      }
+    </script>
+    </body>
+</html>
