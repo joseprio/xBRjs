@@ -25,28 +25,20 @@
   }
 
   function _YuvDifference(A, B) {
+    var alphaA = (A & ALPHAMASK) >> 24;
+    var alphaB = (B & ALPHAMASK) >> 24;
     var yuvA = _getYuv(A);
     var yuvB = _getYuv(B);
 
     /*Add HQx filters threshold & return*/
-    return (Math.abs(yuvA[0] - yuvB[0]) * THRESHHOLD_Y) + (Math.abs(yuvA[1] - yuvB[1]) * THRESHHOLD_U) + (Math.abs(yuvA[2] - yuvB[2]) * THRESHHOLD_V);
+    return Math.abs(alphaA - alphaB)
+         + Math.abs(yuvA[0] - yuvB[0])
+         + Math.abs(yuvA[1] - yuvB[1])
+         + Math.abs(yuvA[2] - yuvB[2]);
   }
 
   function _IsEqual(A, B) {
-    var yuvA = _getYuv(A);
-    var yuvB = _getYuv(B);
-
-    if (Math.abs(yuvA[0] - yuvB[0]) > THRESHHOLD_Y) {
-      return false;
-    }
-    if (Math.abs(yuvA[1] - yuvB[1]) > THRESHHOLD_U) {
-      return false;
-    }
-    if (Math.abs(yuvA[2] - yuvB[2]) > THRESHHOLD_V) {
-      return false;
-    }
-
-    return true;
+    return _YuvDifference(A, B) < 155;
   }
 
   function pixelInterpolate(A, B, q1, q2) {
