@@ -27,26 +27,74 @@
   function _YuvDifference(A, B) {
     var alphaA = (A & ALPHAMASK) >> 24;
     var alphaB = (B & ALPHAMASK) >> 24;
+
+    if (alphaA === 0 && alphaB === 0) {
+      return 0;
+    }
+
+    if (alphaA === 0 || alphaB === 0) {
+      // Very large value not attainable by the thresholds
+      return 1000000;
+    }
+
     var yuvA = _getYuv(A);
     var yuvB = _getYuv(B);
 
     /*Add HQx filters threshold & return*/
-    return Math.abs(alphaA - alphaB)
-         + Math.abs(yuvA[0] - yuvB[0])
-         + Math.abs(yuvA[1] - yuvB[1])
-         + Math.abs(yuvA[2] - yuvB[2]);
+    return Math.abs(yuvA[0] - yuvB[0]) * THRESHHOLD_Y
+         + Math.abs(yuvA[1] - yuvB[1]) * THRESHHOLD_U
+         + Math.abs(yuvA[2] - yuvB[2]) * THRESHHOLD_V;
   }
 
   function _IsEqual(A, B) {
-    return _YuvDifference(A, B) < 155;
+    var alphaA = (A & ALPHAMASK) >> 24;
+    var alphaB = (B & ALPHAMASK) >> 24;
+
+    if (alphaA === 0 && alphaB === 0) {
+      return true;
+    }
+
+    if (alphaA === 0 || alphaB === 0) {
+      return false;
+    }
+
+    var yuvA = _getYuv(A);
+    var yuvB = _getYuv(B);
+
+    if (Math.abs(yuvA[0] - yuvB[0]) > THRESHHOLD_Y) {
+      return false;
+    }
+    if (Math.abs(yuvA[1] - yuvB[1]) > THRESHHOLD_U) {
+      return false;
+    }
+    if (Math.abs(yuvA[2] - yuvB[2]) > THRESHHOLD_V) {
+      return false;
+    }
+
+    return true;
   }
 
   function pixelInterpolate(A, B, q1, q2) {
+    var alphaA = (A & ALPHAMASK) >> 24;
+    var alphaB = (B & ALPHAMASK) >> 24;
+
     /*Extract each value from 32bit Uint & blend colors together*/
-    var r = (q2 * (B & REDMASK) + q1 * (A & REDMASK)) / (q1 + q2);
-    var g = (q2 * ((B & GREENMASK) >> 8) + q1 * ((A & GREENMASK) >> 8)) / (q1 + q2);
-    var b = (q2 * ((B & BLUEMASK) >> 16) + q1 * ((A & BLUEMASK) >> 16)) / (q1 + q2);
-    var a = (q2 * ((B & ALPHAMASK) >> 24) + q1 * ((A & ALPHAMASK) >> 24)) / (q1 + q2);
+    var r, g, b ,a;
+
+    if (alphaA === 0) {
+      r = B & REDMASK;
+      g = (B & GREENMASK) >> 8;
+      b = (B & BLUEMASK) >> 16;
+    } else if (alphaB === 0) {
+      r = A & REDMASK;
+      g = (A & GREENMASK) >> 8;
+      b = (A & BLUEMASK) >> 16;
+    } else {
+      r = (q2 * (B & REDMASK) + q1 * (A & REDMASK)) / (q1 + q2);
+      g = (q2 * ((B & GREENMASK) >> 8) + q1 * ((A & GREENMASK) >> 8)) / (q1 + q2);
+      b = (q2 * ((B & BLUEMASK) >> 16) + q1 * ((A & BLUEMASK) >> 16)) / (q1 + q2);
+    }
+    a = (q2 * ((B & ALPHAMASK) >> 24) + q1 * ((A & ALPHAMASK) >> 24)) / (q1 + q2);
     /*The bit hack '~~' is used to floor the values like Math.floor, but faster*/
     // TODO: remove to allow alpha channel
     return ((~~r) | ((~~g) << 8) | ((~~b) << 16) | ((~~a) << 24));
