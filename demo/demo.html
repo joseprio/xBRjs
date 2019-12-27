@@ -1,58 +1,16 @@
 <html>
-  <head>
-    <title>xBR js demo</title>
-        <script type="text/javascript" src="../xBRjs.js"></script>
+    <head>
+        <title>xBR js demo</title>
+        <script type="text/javascript" src="demo.js"></script>
     </head>
 
     <body>
-
-    <div>
-        <label for="processImage">Pick an image file</label>
-        <input type="file" id="processImage" name="processImage" onchange="readURL(this)"/>
-    </div>
-    <div>
-        <small>Best results with cartoon or 8-bit images</small>
-    </div>
-
-    <script type="text/javascript">
-    function readURL(input) {
-        if (input.files && input.files[0]) {
-            let reader = new FileReader();
-            reader.onload = function(e) {
-                processURL(e.target.result);
-            }
-
-            reader.readAsDataURL(input.files[0]);
-        }
-    }
-
-    function processURL(url) {
-        let image = new Image();
-        image.src=url;
-
-        /*When image loads...*/
-        image.onload =  function(e){
-            image.setAttribute("width", image.width);
-            image.setAttribute("height", image.height);
-            /*Apply 2xBR*/
-            let resultCanvas = applyXBR(image, 2);
-
-            document.body.appendChild(resultCanvas);
-            resultCanvas = applyXBR(image, 3);
-
-            document.body.appendChild(resultCanvas);
-            resultCanvas = applyXBR(image, 4);
-
-            document.body.appendChild(resultCanvas);
-        }
-
-        document.body.appendChild(image);
-    }
-
-    window.onload = function() {
-        let original = document.getElementById("original");
-        processURL("image.png");
-    }
-    </script>
+        <div>
+            <label for="processImage">Pick an image file</label>
+            <input type="file" id="processImage" name="processImage"/>
+        </div>
+        <div>
+            <small>Best results with cartoon or 8-bit images</small>
+        </div>
     </body>
 </html>
