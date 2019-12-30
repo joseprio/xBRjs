@@ -1,11 +1,10 @@
 // Options
-var blendColors = true;
-var use3xOriginalImplementation = false;
+const USE_3X_ORIGINAL_IMPLEMENTATION = false;
 
 const
-  REDMASK = 0x000000FF, // &MASK	>>0
+  REDMASK   = 0x000000FF, // &MASK	>>0
   GREENMASK = 0x0000FF00, // &MASK	>>8
-  BLUEMASK = 0x00FF0000, // &MASK	>>16
+  BLUEMASK  = 0x00FF0000, // &MASK	>>16
   ALPHAMASK = 0xFF000000, // &MASK	>>24
   THRESHHOLD_Y = 48,
   THRESHHOLD_U = 7,
@@ -23,15 +22,20 @@ function getYuv(p) {
   return [y, u, v];
 }
 
-function yuvDifference(A, B) {
+function yuvDifference(A, B, scaleAlpha) {
   const
-    alphaA = (A & ALPHAMASK) >> 24,
-    alphaB = (B & ALPHAMASK) >> 24;
+    alphaA = ((A & ALPHAMASK) >> 24) & 0xff,
+    alphaB = ((B & ALPHAMASK) >> 24) & 0xff;
 
   if (alphaA === 0 && alphaB === 0) {
     return 0;
   }
 
+  if (!scaleAlpha && (alphaA < 255 || alphaB < 255)) {
+    // Very large value not attainable by the thresholds
+    return 1000000;
+  }
+ 
   if (alphaA === 0 || alphaB === 0) {
     // Very large value not attainable by the thresholds
     return 1000000;
@@ -47,13 +51,17 @@ function yuvDifference(A, B) {
        + Math.abs(yuvA[2] - yuvB[2]) * THRESHHOLD_V;
 }
 
-function isEqual(A, B) {
+function isEqual(A, B, scaleAlpha) {
   const
-    alphaA = (A & ALPHAMASK) >> 24,
-    alphaB = (B & ALPHAMASK) >> 24;
+    alphaA = ((A & ALPHAMASK) >> 24) & 0xff,
+    alphaB = ((B & ALPHAMASK) >> 24) & 0xff;
 
   if (alphaA === 0 && alphaB === 0) {
     return true;
+  }
+
+  if (!scaleAlpha && (alphaA < 255 || alphaB < 255)) {
+    return false;
   }
 
   if (alphaA === 0 || alphaB === 0) {
@@ -79,8 +87,8 @@ function isEqual(A, B) {
 
 function pixelInterpolate(A, B, q1, q2) {
   const
-    alphaA = (A & ALPHAMASK) >> 24,
-    alphaB = (B & ALPHAMASK) >> 24;
+    alphaA = ((A & ALPHAMASK) >> 24) & 0xff,
+    alphaB = ((B & ALPHAMASK) >> 24) & 0xff;
 
   /*Extract each value from 32bit Uint & blend colors together*/
   let r, g, b, a;
@@ -98,24 +106,20 @@ function pixelInterpolate(A, B, q1, q2) {
     g = (q2 * ((B & GREENMASK) >> 8) + q1 * ((A & GREENMASK) >> 8)) / (q1 + q2);
     b = (q2 * ((B & BLUEMASK) >> 16) + q1 * ((A & BLUEMASK) >> 16)) / (q1 + q2);
   }
-  a = (q2 * ((B & ALPHAMASK) >> 24) + q1 * ((A & ALPHAMASK) >> 24)) / (q1 + q2);
+  a = (q2 * alphaB + q1 * alphaA) / (q1 + q2);
   /*The bit hack '~~' is used to floor the values like Math.floor, but faster*/
   return ((~~r) | ((~~g) << 8) | ((~~b) << 16) | ((~~a) << 24));
 }
 
-/// <summary>
-/// This is the XBR2x by Hyllian (see http://board.byuu.org/viewtopic.php?f=10&t=2248)
-/// </summary>
-function computeXbr(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, dstY, dstW, factor, allowAlphaBlending) {
-  let xm2 = oriX - 2;
-  if (xm2 < 0) {
-    xm2 = 0;
-  }
+function getRelatedPoints(oriPixelView, oriX, oriY, oriW, oriH) {
   let xm1 = oriX - 1;
   if (xm1 < 0) {
     xm1 = 0;
   }
-  let xp0 = oriX;
+  let xm2 = oriX - 2;
+  if (xm2 < 0) {
+    xm2 = 0;
+  }
   let xp1 = oriX + 1;
   if (xp1 >= oriW) {
     xp1 = oriW - 1;
@@ -124,16 +128,14 @@ function computeXbr(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, ds
   if (xp2 >= oriW) {
     xp2 = oriW - 1;
   }
-
-  let ym2 = oriY - 2;
-  if (ym2 < 0) {
-    ym2 = 0;
-  }
   let ym1 = oriY - 1;
   if (ym1 < 0) {
     ym1 = 0;
   }
-  let yp0 = oriY;
+  let ym2 = oriY - 2;
+  if (ym2 < 0) {
+    ym2 = 0;
+  }
   let yp1 = oriY + 1;
   if (yp1 >= oriH) {
     yp1 = oriH - 1;
@@ -143,400 +145,465 @@ function computeXbr(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, ds
     yp2 = oriH - 1;
   }
 
-  let
-    a1 = oriPixelView[xm1 + ym2 * oriW],
-    b1 = oriPixelView[xp0 + ym2 * oriW],
-    c1 = oriPixelView[xp1 + ym2 * oriW],
+  return [
+    oriPixelView[xm1 + ym2 * oriW],  /* a1 */
+    oriPixelView[oriX + ym2 * oriW], /* b1 */
+    oriPixelView[xp1 + ym2 * oriW],  /* c1 */
 
-    a0 = oriPixelView[xm2 + ym1 * oriW],
-    pa = oriPixelView[xm1 + ym1 * oriW],
-    pb = oriPixelView[xp0 + ym1 * oriW],
-    pc = oriPixelView[xp1 + ym1 * oriW],
-    c4 = oriPixelView[xp2 + ym1 * oriW],
+    oriPixelView[xm2 + ym1 * oriW],  /* a0 */
+    oriPixelView[xm1 + ym1 * oriW],  /* pa */
+    oriPixelView[oriX + ym1 * oriW], /* pb */
+    oriPixelView[xp1 + ym1 * oriW],  /* pc */
+    oriPixelView[xp2 + ym1 * oriW],  /* c4 */
 
-    d0 = oriPixelView[xm2 + yp0 * oriW],
-    pd = oriPixelView[xm1 + yp0 * oriW],
-    pe = oriPixelView[xp0 + yp0 * oriW],
-    pf = oriPixelView[xp1 + yp0 * oriW],
-    f4 = oriPixelView[xp2 + yp0 * oriW],
+    oriPixelView[xm2 + oriY * oriW], /* d0 */
+    oriPixelView[xm1 + oriY * oriW], /* pd */
+    oriPixelView[oriX + oriY * oriW],/* pe */
+    oriPixelView[xp1 + oriY * oriW], /* pf */
+    oriPixelView[xp2 + oriY * oriW], /* f4 */
 
-    g0 = oriPixelView[xm2 + yp1 * oriW],
-    pg = oriPixelView[xm1 + yp1 * oriW],
-    ph = oriPixelView[xp0 + yp1 * oriW],
-    pi = oriPixelView[xp1 + yp1 * oriW],
-    i4 = oriPixelView[xp2 + yp1 * oriW],
+    oriPixelView[xm2 + yp1 * oriW],  /* g0 */
+    oriPixelView[xm1 + yp1 * oriW],  /* pg */
+    oriPixelView[oriX + yp1 * oriW], /* ph */
+    oriPixelView[xp1 + yp1 * oriW],  /* pi */
+    oriPixelView[xp2 + yp1 * oriW],  /* i4 */
 
-    g5 = oriPixelView[xm1 + yp2 * oriW],
-    h5 = oriPixelView[xp0 + yp2 * oriW],
-    i5 = oriPixelView[xp1 + yp2 * oriW],
-
-    e0,
-    e1,
-    e2,
-    e3,
-    e4,
-    e5,
-    e6,
-    e7,
-    e8,
-    e9,
-    ea,
-    eb,
-    ec,
-    ed,
-    ee,
-    ef;
-  e0 = e1 = e2 = e3 = e4 = e5 = e6 = e7 = e8 = e9 = ea = eb = ec = ed = ee = ef = pe;
-
-  if (factor === 2) {
-    [e1, e2, e3] = kernel2Xv5(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, e1, e2, e3, allowAlphaBlending);
-
-    [e0, e3, e1] = kernel2Xv5(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e0, e3, e1, allowAlphaBlending);
-
-    [e2, e1, e0] = kernel2Xv5(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e2, e1, e0, allowAlphaBlending);
-
-    [e3, e0, e2] = kernel2Xv5(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, e3, e0, e2, allowAlphaBlending);
-
-    dstPixelView[dstX + dstY * dstW] = e0;
-    dstPixelView[dstX + 1 + dstY * dstW] = e1;
-    dstPixelView[dstX + (dstY + 1) * dstW] = e2;
-    dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e3;
-  } else if (factor === 3) {
-    [e2, e5, e6, e7, e8] = kernel3X(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, e2, e5, e6, e7, e8, allowAlphaBlending, use3xOriginalImplementation);
-
-    [e0, e1, e8, e5, e2] = kernel3X(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e0, e1, e8, e5, e2, allowAlphaBlending, use3xOriginalImplementation);
-
-    [e6, e3, e2, e1, e0] = kernel3X(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e6, e3, e2, e1, e0, allowAlphaBlending, use3xOriginalImplementation);
-
-    [e8, e7, e0, e3, e6] = kernel3X(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, e8, e7, e0, e3, e6, allowAlphaBlending, use3xOriginalImplementation);
-
-    dstPixelView[dstX + dstY * dstW] = e0;
-    dstPixelView[dstX + 1 + dstY * dstW] = e1;
-    dstPixelView[dstX + 2 + dstY * dstW] = e2;
-    dstPixelView[dstX + (dstY + 1) * dstW] = e3;
-    dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e4;
-    dstPixelView[dstX + 2 + (dstY + 1) * dstW] = e5;
-    dstPixelView[dstX + (dstY + 2) * dstW] = e6;
-    dstPixelView[dstX + 1 + (dstY + 2) * dstW] = e7;
-    dstPixelView[dstX + 2 + (dstY + 2) * dstW] = e8;
-  } else if (factor === 4) {
-    [ef, ee, eb, e3, e7, ea, ed, ec] = kernel4Xv2(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, ef, ee, eb, e3, e7, ea, ed, ec, allowAlphaBlending);
-
-    [e3, e7, e2, e0, e1, e6, eb, ef] = kernel4Xv2(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e3, e7, e2, e0, e1, e6, eb, ef, allowAlphaBlending);
-
-    [e0, e1, e4, ec, e8, e5, e2, e3] = kernel4Xv2(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e0, e1, e4, ec, e8, e5, e2, e3, allowAlphaBlending);
-
-    [ec, e8, ed, ef, ee, e9, e4, e0] = kernel4Xv2(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, ec, e8, ed, ef, ee, e9, e4, e0, allowAlphaBlending);
-
-    dstPixelView[dstX + dstY * dstW] = e0;
-    dstPixelView[dstX + 1 + dstY * dstW] = e1;
-    dstPixelView[dstX + 2 + dstY * dstW] = e2;
-    dstPixelView[dstX + 3 + dstY * dstW] = e3;
-    dstPixelView[dstX + (dstY + 1) * dstW] = e4;
-    dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e5;
-    dstPixelView[dstX + 2 + (dstY + 1) * dstW] = e6;
-    dstPixelView[dstX + 3 + (dstY + 1) * dstW] = e7;
-    dstPixelView[dstX + (dstY + 2) * dstW] = e8;
-    dstPixelView[dstX + 1 + (dstY + 2) * dstW] = e9;
-    dstPixelView[dstX + 2 + (dstY + 2) * dstW] = ea;
-    dstPixelView[dstX + 3 + (dstY + 2) * dstW] = eb;
-    dstPixelView[dstX + (dstY + 3) * dstW] = ec;
-    dstPixelView[dstX + 1 + (dstY + 3) * dstW] = ed;
-    dstPixelView[dstX + 2 + (dstY + 3) * dstW] = ee;
-    dstPixelView[dstX + 3 + (dstY + 3) * dstW] = ef;
-  }
+    oriPixelView[xm1 + yp2 * oriW],  /* g5 */
+    oriPixelView[oriX + yp2 * oriW], /* h5 */
+    oriPixelView[xp1 + yp2 * oriW]   /* i5 */
+  ];
 }
 
-function alphaBlend32W(dst, src, blend) {
-  if (blend) {
+// This is the XBR2x by Hyllian (see http://board.byuu.org/viewtopic.php?f=10&t=2248)
+function computeXbr2x(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, dstY, dstW, blendColors, scaleAlpha) {
+  const relatedPoints = getRelatedPoints(oriPixelView, oriX, oriY, oriW, oriH);
+  const
+    [a1,
+     b1,
+     c1,
+	 a0,
+     pa,
+     pb,
+     pc,
+     c4,
+     d0,
+     pd,
+     pe,
+     pf,
+     f4,
+     g0,
+     pg,
+     ph,
+     pi,
+     i4,
+     g5,
+     h5,
+     i5] = relatedPoints;
+  let e0, e1, e2, e3;
+  e0 = e1 = e2 = e3 = pe;
+
+  [e1, e2, e3] = kernel2Xv5(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, e1, e2, e3, blendColors, scaleAlpha);
+  [e0, e3, e1] = kernel2Xv5(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e0, e3, e1, blendColors, scaleAlpha);
+  [e2, e1, e0] = kernel2Xv5(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e2, e1, e0, blendColors, scaleAlpha);
+  [e3, e0, e2] = kernel2Xv5(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, e3, e0, e2, blendColors, scaleAlpha);
+
+  dstPixelView[dstX + dstY * dstW] = e0;
+  dstPixelView[dstX + 1 + dstY * dstW] = e1;
+  dstPixelView[dstX + (dstY + 1) * dstW] = e2;
+  dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e3;  
+}
+
+function computeXbr3x(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, dstY, dstW, blendColors, scaleAlpha) {
+  const relatedPoints = getRelatedPoints(oriPixelView, oriX, oriY, oriW, oriH);
+  const
+    [a1,
+     b1,
+     c1,
+	 a0,
+     pa,
+     pb,
+     pc,
+     c4,
+     d0,
+     pd,
+     pe,
+     pf,
+     f4,
+     g0,
+     pg,
+     ph,
+     pi,
+     i4,
+     g5,
+     h5,
+     i5] = relatedPoints;
+  let e0, e1, e2, e3, e4, e5, e6, e7, e8;
+  e0 = e1 = e2 = e3 = e4 = e5 = e6 = e7 = e8 = pe;
+
+  [e2, e5, e6, e7, e8] = kernel3X(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, e2, e5, e6, e7, e8, blendColors, scaleAlpha);
+  [e0, e1, e8, e5, e2] = kernel3X(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e0, e1, e8, e5, e2, blendColors, scaleAlpha);
+  [e6, e3, e2, e1, e0] = kernel3X(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e6, e3, e2, e1, e0, blendColors, scaleAlpha);
+  [e8, e7, e0, e3, e6] = kernel3X(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, e8, e7, e0, e3, e6, blendColors, scaleAlpha);
+
+  dstPixelView[dstX + dstY * dstW] = e0;
+  dstPixelView[dstX + 1 + dstY * dstW] = e1;
+  dstPixelView[dstX + 2 + dstY * dstW] = e2;
+  dstPixelView[dstX + (dstY + 1) * dstW] = e3;
+  dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e4;
+  dstPixelView[dstX + 2 + (dstY + 1) * dstW] = e5;
+  dstPixelView[dstX + (dstY + 2) * dstW] = e6;
+  dstPixelView[dstX + 1 + (dstY + 2) * dstW] = e7;
+  dstPixelView[dstX + 2 + (dstY + 2) * dstW] = e8;
+}
+
+
+function computeXbr4x(oriPixelView, oriX, oriY, oriW, oriH, dstPixelView, dstX, dstY, dstW, blendColors, scaleAlpha) {
+  const relatedPoints = getRelatedPoints(oriPixelView, oriX, oriY, oriW, oriH);
+  const
+    [a1,
+     b1,
+     c1,
+	 a0,
+     pa,
+     pb,
+     pc,
+     c4,
+     d0,
+     pd,
+     pe,
+     pf,
+     f4,
+     g0,
+     pg,
+     ph,
+     pi,
+     i4,
+     g5,
+     h5,
+     i5] = relatedPoints;
+  let e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, ea, eb, ec, ed, ee, ef;
+  e0 = e1 = e2 = e3 = e4 = e5 = e6 = e7 = e8 = e9 = ea = eb = ec = ed = ee = ef = pe;
+
+  [ef, ee, eb, e3, e7, ea, ed, ec] = kernel4Xv2(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, ef, ee, eb, e3, e7, ea, ed, ec, blendColors, scaleAlpha);
+  [e3, e7, e2, e0, e1, e6, eb, ef] = kernel4Xv2(pe, pc, pf, pb, pi, pa, ph, pd, b1, c1, f4, c4, e3, e7, e2, e0, e1, e6, eb, ef, blendColors, scaleAlpha);
+  [e0, e1, e4, ec, e8, e5, e2, e3] = kernel4Xv2(pe, pa, pb, pd, pc, pg, pf, ph, d0, a0, b1, a1, e0, e1, e4, ec, e8, e5, e2, e3, blendColors, scaleAlpha);
+  [ec, e8, ed, ef, ee, e9, e4, e0] = kernel4Xv2(pe, pg, pd, ph, pa, pi, pb, pf, h5, g5, d0, g0, ec, e8, ed, ef, ee, e9, e4, e0, blendColors, scaleAlpha);
+
+  dstPixelView[dstX + dstY * dstW] = e0;
+  dstPixelView[dstX + 1 + dstY * dstW] = e1;
+  dstPixelView[dstX + 2 + dstY * dstW] = e2;
+  dstPixelView[dstX + 3 + dstY * dstW] = e3;
+  dstPixelView[dstX + (dstY + 1) * dstW] = e4;
+  dstPixelView[dstX + 1 + (dstY + 1) * dstW] = e5;
+  dstPixelView[dstX + 2 + (dstY + 1) * dstW] = e6;
+  dstPixelView[dstX + 3 + (dstY + 1) * dstW] = e7;
+  dstPixelView[dstX + (dstY + 2) * dstW] = e8;
+  dstPixelView[dstX + 1 + (dstY + 2) * dstW] = e9;
+  dstPixelView[dstX + 2 + (dstY + 2) * dstW] = ea;
+  dstPixelView[dstX + 3 + (dstY + 2) * dstW] = eb;
+  dstPixelView[dstX + (dstY + 3) * dstW] = ec;
+  dstPixelView[dstX + 1 + (dstY + 3) * dstW] = ed;
+  dstPixelView[dstX + 2 + (dstY + 3) * dstW] = ee;
+  dstPixelView[dstX + 3 + (dstY + 3) * dstW] = ef;
+}
+
+function alphaBlend32W(dst, src, blendColors) {
+  if (blendColors) {
     return pixelInterpolate(dst, src, 7, 1);
   }
 
   return dst;
 }
 
-function alphaBlend64W(dst, src, blend) {
-  if (blend) {
+function alphaBlend64W(dst, src, blendColors) {
+  if (blendColors) {
     return pixelInterpolate(dst, src, 3, 1);
   }
   return dst;
 }
 
-function alphaBlend128W(dst, src, blend) {
-  if (blend) {
+function alphaBlend128W(dst, src, blendColors) {
+  if (blendColors) {
     return pixelInterpolate(dst, src, 1, 1);
   }
   return dst;
 }
 
-function alphaBlend192W(dst, src, blend) {
-  if (blend) {
+function alphaBlend192W(dst, src, blendColors) {
+  if (blendColors) {
     return pixelInterpolate(dst, src, 1, 3);
   }
   return src;
 }
 
-function alphaBlend224W(dst, src, blend) {
-  if (blend) {
+function alphaBlend224W(dst, src, blendColors) {
+  if (blendColors) {
     return pixelInterpolate(dst, src, 1, 7);
   }
   return src;
 }
 
-function leftUp2_2X(n3, n2, pixel, blend) {
-  const blendedN2 = alphaBlend64W(n2, pixel, blend);
+function leftUp2_2X(n3, n2, pixel, blendColors) {
+  const blendedN2 = alphaBlend64W(n2, pixel, blendColors);
   return [
-    alphaBlend224W(n3, pixel, blend),
+    alphaBlend224W(n3, pixel, blendColors),
     blendedN2,
     blendedN2
   ];
 }
 
-function left2_2X(n3, n2, pixel, blend) {
-  n3 = alphaBlend192W(n3, pixel, blend);
-  n2 = alphaBlend64W(n2, pixel, blend);
-  return [n3, n2];
-}
-function up2_2X(n3, n1, pixel, blend) {
+function left2_2X(n3, n2, pixel, blendColors) {
   return [
-    alphaBlend192W(n3, pixel, blend),
-    alphaBlend64W(n1, pixel, blend)
+    alphaBlend192W(n3, pixel, blendColors),
+    alphaBlend64W(n2, pixel, blendColors)
   ];
 }
 
-function dia_2X(n3, pixel, blend) {
-  return alphaBlend128W(n3, pixel, blend);
+function up2_2X(n3, n1, pixel, blendColors) {
+  return [
+    alphaBlend192W(n3, pixel, blendColors),
+    alphaBlend64W(n1, pixel, blendColors)
+  ];
 }
 
-function kernel2Xv5(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n1, n2, n3, blend) {
+function dia_2X(n3, pixel, blendColors) {
+  return alphaBlend128W(n3, pixel, blendColors);
+}
+
+function kernel2Xv5(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n1, n2, n3, blendColors, scaleAlpha) {
   let ex = (pe != ph && pe != pf);
   if (!ex) {
     return [n1, n2, n3];
   }
   let
-    e = (yuvDifference(pe, pc) + yuvDifference(pe, pg) + yuvDifference(pi, h5) + yuvDifference(pi, f4)) + (yuvDifference(ph, pf) << 2),
-    i = (yuvDifference(ph, pd) + yuvDifference(ph, i5) + yuvDifference(pf, i4) + yuvDifference(pf, pb)) + (yuvDifference(pe, pi) << 2),
-    px = (yuvDifference(pe, pf) <= yuvDifference(pe, ph)) ? pf : ph;
+    e = (yuvDifference(pe, pc, scaleAlpha) + yuvDifference(pe, pg, scaleAlpha) + yuvDifference(pi, h5, scaleAlpha) + yuvDifference(pi, f4, scaleAlpha)) + (yuvDifference(ph, pf) << 2),
+    i = (yuvDifference(ph, pd, scaleAlpha) + yuvDifference(ph, i5, scaleAlpha) + yuvDifference(pf, i4, scaleAlpha) + yuvDifference(pf, pb, scaleAlpha)) + (yuvDifference(pe, pi, scaleAlpha) << 2),
+    px = (yuvDifference(pe, pf, scaleAlpha) <= yuvDifference(pe, ph, scaleAlpha)) ? pf : ph;
 
-  if ((e < i) && (!isEqual(pf, pb) && !isEqual(ph, pd) || isEqual(pe, pi) && (!isEqual(pf, i4) && !isEqual(ph, i5)) || isEqual(pe, pg) || isEqual(pe, pc))) {
+  if ((e < i) && (!isEqual(pf, pb, scaleAlpha) && !isEqual(ph, pd, scaleAlpha) || isEqual(pe, pi, scaleAlpha) && (!isEqual(pf, i4, scaleAlpha) && !isEqual(ph, i5, scaleAlpha)) || isEqual(pe, pg, scaleAlpha) || isEqual(pe, pc, scaleAlpha))) {
     let
-      ke = yuvDifference(pf, pg),
-      ki = yuvDifference(ph, pc),
+      ke = yuvDifference(pf, pg, scaleAlpha),
+      ki = yuvDifference(ph, pc, scaleAlpha),
       ex2 = (pe != pc && pb != pc),
       ex3 = (pe != pg && pd != pg);
     if (((ke << 1) <= ki) && ex3 || (ke >= (ki << 1)) && ex2) {
       if (((ke << 1) <= ki) && ex3) {
-        let leftOut = left2_2X(n3, n2, px, blend);
+        let leftOut = left2_2X(n3, n2, px, blendColors);
         n3 = leftOut[0];
         n2 = leftOut[1];
       }
       if ((ke >= (ki << 1)) && ex2) {
-        let upOut = up2_2X(n3, n1, px, blend);
+        let upOut = up2_2X(n3, n1, px, blendColors);
         n3 = upOut[0];
         n1 = upOut[1];
       }
     } else {
-      n3 = dia_2X(n3, px, blend);
+      n3 = dia_2X(n3, px, blendColors);
     }
 
   } else if (e <= i) {
-    n3 = alphaBlend64W(n3, px, blend);
+    n3 = alphaBlend64W(n3, px, blendColors);
   }
   return [n1, n2, n3];
 }
 
-function leftUp2_3X(n7, n5, n6, n2, n8, pixel, blend) {
+function leftUp2_3X(n7, n5, n6, n2, n8, pixel, blendColors) {
   const
-    blendedN7 = alphaBlend192W(n7, pixel, blend),
-    blendedN6 = alphaBlend64W(n6, pixel, blend);
+    blendedN7 = alphaBlend192W(n7, pixel, blendColors),
+    blendedN6 = alphaBlend64W(n6, pixel, blendColors);
   return [
     blendedN7,
     blendedN7,
     blendedN6,
-    blendedN6,pixel
+    blendedN6,
+	pixel
   ];
 }
 
-function left2_3X(n7, n5, n6, n8, pixel, blend) {
+function left2_3X(n7, n5, n6, n8, pixel, blendColors) {
   return [
-    alphaBlend192W(n7, pixel, blend),
-    alphaBlend64W(n5, pixel, blend),
-    alphaBlend64W(n6, pixel, blend),
+    alphaBlend192W(n7, pixel, blendColors),
+    alphaBlend64W(n5, pixel, blendColors),
+    alphaBlend64W(n6, pixel, blendColors),
     pixel
   ];
 }
 
-function up2_3X(n5, n7, n2, n8, pixel, blend) {
+function up2_3X(n5, n7, n2, n8, pixel, blendColors) {
   return [
-    alphaBlend192W(n5, pixel, blend),
-    alphaBlend64W(n7, pixel, blend),
-    alphaBlend64W(n2, pixel, blend),
+    alphaBlend192W(n5, pixel, blendColors),
+    alphaBlend64W(n7, pixel, blendColors),
+    alphaBlend64W(n2, pixel, blendColors),
     pixel
   ];
 }
 
-function dia_3X(n8, n5, n7, pixel, blend) {
+function dia_3X(n8, n5, n7, pixel, blendColors) {
   return [
-    alphaBlend224W(n8, pixel, blend),
-    alphaBlend32W(n5, pixel, blend),
-    alphaBlend32W(n7, pixel, blend)
+    alphaBlend224W(n8, pixel, blendColors),
+    alphaBlend32W(n5, pixel, blendColors),
+    alphaBlend32W(n7, pixel, blendColors)
   ];
 }
 
-function kernel3X(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n2, n5, n6, n7, n8, blend, useOriginalImplementation) {
+function kernel3X(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n2, n5, n6, n7, n8, blendColors, scaleAlpha) {
   const ex = (pe != ph && pe != pf);
   if (!ex) {
     return [n2, n5, n6, n7, n8];
   }
 
   const
-    e = (yuvDifference(pe, pc) + yuvDifference(pe, pg) + yuvDifference(pi, h5) + yuvDifference(pi, f4)) + (yuvDifference(ph, pf) << 2),
-    i = (yuvDifference(ph, pd) + yuvDifference(ph, i5) + yuvDifference(pf, i4) + yuvDifference(pf, pb)) + (yuvDifference(pe, pi) << 2);
+    e = (yuvDifference(pe, pc, scaleAlpha) + yuvDifference(pe, pg, scaleAlpha) + yuvDifference(pi, h5, scaleAlpha) + yuvDifference(pi, f4, scaleAlpha)) + (yuvDifference(ph, pf, scaleAlpha) << 2),
+    i = (yuvDifference(ph, pd, scaleAlpha) + yuvDifference(ph, i5, scaleAlpha) + yuvDifference(pf, i4, scaleAlpha) + yuvDifference(pf, pb, scaleAlpha)) + (yuvDifference(pe, pi, scaleAlpha) << 2);
 
   let state;
-  if (useOriginalImplementation) {
-    state = ((e < i) && (!isEqual(pf, pb) && !isEqual(ph, pd) || isEqual(pe, pi) && (!isEqual(pf, i4) && !isEqual(ph, i5)) || isEqual(pe, pg) || isEqual(pe, pc)));
+  if (USE_3X_ORIGINAL_IMPLEMENTATION) {
+    state = ((e < i) && (!isEqual(pf, pb, scaleAlpha) && !isEqual(ph, pd, scaleAlpha) || isEqual(pe, pi, scaleAlpha) && (!isEqual(pf, i4, scaleAlpha) && !isEqual(ph, i5, scaleAlpha)) || isEqual(pe, pg, scaleAlpha) || isEqual(pe, pc, scaleAlpha)));
   } else {
-    state = ((e < i) && (!isEqual(pf, pb) && !isEqual(pf, pc) || !isEqual(ph, pd) && !isEqual(ph, pg) || isEqual(pe, pi) && (!isEqual(pf, f4) && !isEqual(pf, i4) || !isEqual(ph, h5) && !isEqual(ph, i5)) || isEqual(pe, pg) || isEqual(pe, pc)));
+    state = ((e < i) && (!isEqual(pf, pb, scaleAlpha) && !isEqual(pf, pc, scaleAlpha) || !isEqual(ph, pd, scaleAlpha) && !isEqual(ph, pg, scaleAlpha) || isEqual(pe, pi, scaleAlpha) && (!isEqual(pf, f4, scaleAlpha) && !isEqual(pf, i4, scaleAlpha) || !isEqual(ph, h5, scaleAlpha) && !isEqual(ph, i5, scaleAlpha)) || isEqual(pe, pg, scaleAlpha) || isEqual(pe, pc, scaleAlpha)));
   }
 
   if (state) {
     const
-      ke = yuvDifference(pf, pg),
-      ki = yuvDifference(ph, pc),
+      ke = yuvDifference(pf, pg, scaleAlpha),
+      ki = yuvDifference(ph, pc, scaleAlpha),
       ex2 = (pe != pc && pb != pc),
       ex3 = (pe != pg && pd != pg),
-      px = (yuvDifference(pe, pf) <= yuvDifference(pe, ph)) ? pf : ph;
+      px = (yuvDifference(pe, pf, scaleAlpha) <= yuvDifference(pe, ph, scaleAlpha)) ? pf : ph;
     if (((ke << 1) <= ki) && ex3 && (ke >= (ki << 1)) && ex2) {
-      [n7, n5, n6, n2, n8] = leftUp2_3X(n7, n5, n6, n2, n8, px, blend);
+      [n7, n5, n6, n2, n8] = leftUp2_3X(n7, n5, n6, n2, n8, px, blendColors);
     } else if (((ke << 1) <= ki) && ex3) {
-      [n7, n5, n6, n8] = left2_3X(n7, n5, n6, n8, px, blend);
+      [n7, n5, n6, n8] = left2_3X(n7, n5, n6, n8, px, blendColors);
     } else if ((ke >= (ki << 1)) && ex2) {
-      [n5, n7, n2, n8] = up2_3X(n5, n7, n2, n8, px, blend);
+      [n5, n7, n2, n8] = up2_3X(n5, n7, n2, n8, px, blendColors);
     } else {
-      [n8, n5, n7] = dia_3X(n8, n5, n7, px, blend);
+      [n8, n5, n7] = dia_3X(n8, n5, n7, px, blendColors);
     }
   } else if (e <= i) {
-    n8 = alphaBlend128W(n8, ((yuvDifference(pe, pf) <= yuvDifference(pe, ph)) ? pf : ph), blend);
+    n8 = alphaBlend128W(n8, ((yuvDifference(pe, pf, scaleAlpha) <= yuvDifference(pe, ph, scaleAlpha)) ? pf : ph), blendColors);
   }
   return [n2, n5, n6, n7, n8];
 }
 
 // 4xBR
-function leftUp2(n15, n14, n11, n13, n12, n10, n7, n3, pixel, blend) {
+function leftUp2(n15, n14, n11, n13, n12, n10, n7, n3, pixel, blendColors) {
   const
-    blendedN13 = alphaBlend192W(n13, pixel, blend),
-    blendedN12 = alphaBlend64W(n12, pixel, blend);
+    blendedN13 = alphaBlend192W(n13, pixel, blendColors),
+    blendedN12 = alphaBlend64W(n12, pixel, blendColors);
 
   return [pixel, pixel, pixel, blendedN12, blendedN12, blendedN12, blendedN13, n3];
 }
 
-function left2(n15, n14, n11, n13, n12, n10, pixel, blend) {
-  n11 = alphaBlend192W(n11, pixel, blend);
-  n13 = alphaBlend192W(n13, pixel, blend);
-  n10 = alphaBlend64W(n10, pixel, blend);
-  n12 = alphaBlend64W(n12, pixel, blend);
-  n14 = pixel;
-  n15 = pixel;
-
-  return [n15, n14, n11, n13, n12, n10];
+function left2(n15, n14, n11, n13, n12, n10, pixel, blendColors) {
+  return [
+    pixel,
+	pixel,
+	alphaBlend192W(n11, pixel, blendColors),
+	alphaBlend192W(n13, pixel, blendColors),
+	alphaBlend64W(n12, pixel, blendColors),
+	alphaBlend64W(n10, pixel, blendColors)
+  ];
 }
 
-function up2(n15, n14, n11, n3, n7, n10, pixel, blend) {
-  n14 = alphaBlend192W(n14, pixel, blend);
-  n7 = alphaBlend192W(n7, pixel, blend);
-  n10 = alphaBlend64W(n10, pixel, blend);
-  n3 = alphaBlend64W(n3, pixel, blend);
-  n11 = pixel;
-  n15 = pixel;
-
-  return [n15, n14, n11, n3, n7, n10];
+function up2(n15, n14, n11, n3, n7, n10, pixel, blendColors) {
+  return [
+	pixel,
+	alphaBlend192W(n14, pixel, blendColors),
+	pixel,
+	alphaBlend64W(n3, pixel, blendColors),
+	alphaBlend192W(n7, pixel, blendColors),
+	alphaBlend64W(n10, pixel, blendColors)
+  ];
 }
 
-function dia(n15, n14, n11, pixel, blend) {
-  n11 = alphaBlend128W(n11, pixel, blend);
-  n14 = alphaBlend128W(n14, pixel, blend);
-  n15 = pixel;
-
-  return [n15, n14, n11];
+function dia(n15, n14, n11, pixel, blendColors) {
+  return [
+	pixel,
+	alphaBlend128W(n14, pixel, blendColors),
+	alphaBlend128W(n11, pixel, blendColors)
+  ];
 }
 
-function kernel4Xv2(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n15, n14, n11, n3, n7, n10, n13, n12, blend) {
+function kernel4Xv2(pe, pi, ph, pf, pg, pc, pd, pb, f4, i4, h5, i5, n15, n14, n11, n3, n7, n10, n13, n12, blendColors, scaleAlpha) {
   var ex = (pe != ph && pe != pf);
   if (!ex) {
     return [n15, n14, n11, n3, n7, n10, n13, n12];
   }
   const
-    e = (yuvDifference(pe, pc) + yuvDifference(pe, pg) + yuvDifference(pi, h5) + yuvDifference(pi, f4)) + (yuvDifference(ph, pf) << 2),
-    i = (yuvDifference(ph, pd) + yuvDifference(ph, i5) + yuvDifference(pf, i4) + yuvDifference(pf, pb)) + (yuvDifference(pe, pi) << 2),
-    px = (yuvDifference(pe, pf) <= yuvDifference(pe, ph)) ? pf : ph;
-  if ((e < i) && (!isEqual(pf, pb) && !isEqual(ph, pd) || isEqual(pe, pi) && (!isEqual(pf, i4) && !isEqual(ph, i5)) || isEqual(pe, pg) || isEqual(pe, pc))) {
+    e = (yuvDifference(pe, pc, scaleAlpha) + yuvDifference(pe, pg, scaleAlpha) + yuvDifference(pi, h5, scaleAlpha) + yuvDifference(pi, f4, scaleAlpha)) + (yuvDifference(ph, pf, scaleAlpha) << 2),
+    i = (yuvDifference(ph, pd, scaleAlpha) + yuvDifference(ph, i5, scaleAlpha) + yuvDifference(pf, i4, scaleAlpha) + yuvDifference(pf, pb, scaleAlpha)) + (yuvDifference(pe, pi, scaleAlpha) << 2),
+    px = (yuvDifference(pe, pf, scaleAlpha) <= yuvDifference(pe, ph, scaleAlpha)) ? pf : ph;
+  if ((e < i) && (!isEqual(pf, pb, scaleAlpha) && !isEqual(ph, pd, scaleAlpha) || isEqual(pe, pi, scaleAlpha) && (!isEqual(pf, i4, scaleAlpha) && !isEqual(ph, i5, scaleAlpha)) || isEqual(pe, pg, scaleAlpha) || isEqual(pe, pc, scaleAlpha))) {
     const
-      ke = yuvDifference(pf, pg),
-      ki = yuvDifference(ph, pc),
+      ke = yuvDifference(pf, pg, scaleAlpha),
+      ki = yuvDifference(ph, pc, scaleAlpha),
       ex2 = (pe != pc && pb != pc),
       ex3 = (pe != pg && pd != pg);
     if (((ke << 1) <= ki) && ex3 || (ke >= (ki << 1)) && ex2) {
       if (((ke << 1) <= ki) && ex3) {
-        [n15, n14, n11, n13, n12, n10] = left2(n15, n14, n11, n13, n12, n10, px, blend);
+        [n15, n14, n11, n13, n12, n10] = left2(n15, n14, n11, n13, n12, n10, px, blendColors);
       }
       if ((ke >= (ki << 1)) && ex2) {
-        [n15, n14, n11, n3, n7, n10] = up2(n15, n14, n11, n3, n7, n10, px, blend);
+        [n15, n14, n11, n3, n7, n10] = up2(n15, n14, n11, n3, n7, n10, px, blendColors);
       }
     } else {
-      [n15, n14, n11] = dia(n15, n14, n11, px, blend);
+      [n15, n14, n11] = dia(n15, n14, n11, px, blendColors);
     }
 
   } else if (e <= i) {
-    n15 = alphaBlend128W(n15, px, blend);
+    n15 = alphaBlend128W(n15, px, blendColors);
   }
 
   return [n15, n14, n11, n3, n7, n10, n13, n12];
 }
 
-export function applyXBR(image, factor) {
-  const canvas = document.createElement('canvas');
-  const
-    sourceWidth = image.width,
-    sourceHeight = image.height;
-  canvas.width = sourceWidth;
-  canvas.height = sourceHeight;
+function parseOptions(rawOpts) {
+  let
+    blendColors = true,
+    scaleAlpha = false;
 
-  const context = canvas.getContext('2d');
-  context.drawImage(image, 0, 0);
-
-  const
-    scaledWidth = sourceWidth * factor,
-    scaledHeight = sourceHeight * factor,
-    originalImageData = context.getImageData(
-      0,
-      0,
-      sourceWidth,
-      sourceHeight);
-  /*32bit View (4 bytes: Red,Greed,Blue,Alpha)*/
-  const originalPixelView = new Uint32Array(originalImageData.data.buffer);
-
-  /**
-   * ImageData scaledImageData
-   * Scaled image's data, below this variable is the scaledPixelView,
-   * a 32bit ArrayView of the 8bit data array inside the scaledImageData's
-   * buffer (scaledImageData.data.buffer)
-   **/
-  const scaledImageData = context.createImageData(
-      scaledWidth,
-      scaledHeight);
-  /*32bit View (4 bytes: Red,Greed,Blue,Alpha)*/
-  const scaledPixelView = new Uint32Array(scaledImageData.data.buffer);
-  for (let c = 0; c < sourceWidth; c++) {
-    for (let d = 0; d < sourceHeight; d++) {
-      computeXbr(originalPixelView, c, d, sourceWidth, sourceHeight, scaledPixelView, c * factor, d * factor, scaledWidth, factor, blendColors);
+  if (rawOpts) {
+	if (rawOpts.blendColors === false) {
+	  blendColors = false;
+	}
+		
+	if (rawOpts.scaleAlpha === true) {
+      scaleAlpha = true;
     }
   }
+	
+  return {blendColors, scaleAlpha};
+}
 
-  canvas.width = scaledWidth;
-  canvas.height = scaledHeight;
+export function xbr2x(pixelArray, width, height, options) {
+  const {blendColors, scaleAlpha} = parseOptions(options);
+  const scaledPixelArray = new Uint32Array(width * height * 4);
+  for (let c = 0; c < width; c++) {
+    for (let d = 0; d < height; d++) {
+      computeXbr2x(pixelArray, c, d, width, height, scaledPixelArray, c * 2, d * 2, width * 2, blendColors, scaleAlpha);
+    }
+  }
+  return scaledPixelArray;
+}
 
-  context.putImageData(scaledImageData, 0, 0);
+export function xbr3x(pixelArray, width, height, options) {
+  const {blendColors, scaleAlpha} = parseOptions(options);
+  const scaledPixelArray = new Uint32Array(width * height * 9);
+  for (let c = 0; c < width; c++) {
+    for (let d = 0; d < height; d++) {
+      computeXbr3x(pixelArray, c, d, width, height, scaledPixelArray, c * 3, d * 3, width * 3, blendColors, scaleAlpha);
+    }
+  }
+  return scaledPixelArray;
+}
 
-  return canvas;
+export function xbr4x(pixelArray, width, height, options) {
+  const {blendColors, scaleAlpha} = parseOptions(options);
+  const scaledPixelArray = new Uint32Array(width * height * 16);
+  for (let c = 0; c < width; c++) {
+    for (let d = 0; d < height; d++) {
+      computeXbr4x(pixelArray, c, d, width, height, scaledPixelArray, c * 4, d * 4, width * 4, blendColors, scaleAlpha);
+    }
+  }
+  return scaledPixelArray;
 }

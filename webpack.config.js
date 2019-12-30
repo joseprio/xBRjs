@@ -6,4 +6,7 @@ module.exports = {
     filename: 'demo.js',
     path: path.resolve(__dirname, 'demo'),
   },
+  optimization: {
+	  minimize: false,
+  }
 };
