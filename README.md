@@ -1,6 +1,6 @@
 # xBRjs
 
-[![NPM Version](https://img.shields.io/npm/v/incremental-js-identifier.svg)](https://www.npmjs.com/package/incremental-js-identifier)
+[![NPM Version](https://img.shields.io/npm/v/xbr-js.svg)](https://www.npmjs.com/package/xbr-js)
 
 JS implementation of the xBR image scaling algorytm by Hyllian.
 
