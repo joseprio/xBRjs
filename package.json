@@ -1,10 +1,10 @@
 {
   "name": "xbr-js",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "xBRjs is a library to upscale images",
-  "main": "src/index.js",
+  "module": "src/index.js",
   "scripts": {
-    "build": "webpack"
+    "build": "webpack --config demo.config.js && webpack --config umd.config.js && webpack --config umd.min.config.js && webpack --config esm.config.js && webpack --config esm.min.config.js"
   },
   "repository": {
     "type": "git",
@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/joseprio/xBRjs#readme",
   "devDependencies": {
+    "@purtuga/esm-webpack-plugin": "^1.2.1",
     "webpack": "^4.41.4",
     "webpack-cli": "^3.3.10"
   }
