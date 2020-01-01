@@ -8,10 +8,10 @@ JS implementation of the xBR image scaling algorytm by Hyllian.
 
 ```sh
 # npm
-npm install xbr-js --save-dev
+npm install xbr-js --save
 
 # yarn
-yarn add xbr-js --dev
+yarn add xbr-js
 ```
 
 ## Usage
