@@ -9,6 +9,17 @@ module.exports = {
     libraryTarget: 'umd',
     filename: 'xBRjs.umd.js'
   },
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader'
+        }
+      }
+    ]
+  },
   optimization: {
 	  minimize: false,
   }
