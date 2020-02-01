@@ -18,25 +18,25 @@ yarn add xbr-js
 
 ```js
 import {xbr2x, xbr3x, xbr4x} from 'xbr-js';
+```
 
-...
+```js
+// if you have an <img>, draw it on a canvas first
+const canvas = document.createElement('canvas');
+const sourceWidth = canvas.width = img.width;
+const sourceHeight = canvas.height = img.height;
+const context = canvas.getContext('2d');
+context.drawImage(img, 0, 0);
 
-const
-  scaledWidth = sourceWidth * 2,
-  scaledHeight = sourceHeight * 2,
-  originalImageData = context.getImageData(
-    0,
-    0,
-    sourceWidth,
-    sourceHeight);
+// the following code will apply xbr2x to an existing canvas
+canvas.width = sourceWidth * 2;
+canvas.height = sourceHeight * 2;
 
+const originalImageData = context.getImageData(0, 0, sourceWidth, sourceHeight);
 const originalPixelView = new Uint32Array(originalImageData.data.buffer);
-
 const scaledPixelView = xbr2x(originalPixelView, sourceWidth, sourceHeight);
-
-const scaledImageData = new ImageData(new Uint8ClampedArray(scaledPixelView.buffer), scaledWidth, scaledHeight);
-canvas.width = scaledWidth;
-canvas.height = scaledHeight;
+const scaledImageData = context.createImageData(canvas.width, canvas.height);
+scaledImageData.data.set(new Uint8ClampedArray(scaledPixelView.buffer));
 
 context.putImageData(scaledImageData, 0, 0);
 ```
